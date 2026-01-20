@@ -1,22 +1,99 @@
 version: '3.8'
+
 services:
   db:
-    image: postgres:15
+    image: postgres:13
     environment:
       POSTGRES_DB: analytics_db
       POSTGRES_USER: user
       POSTGRES_PASSWORD: password
-    ports:
-      - "5432:5432"
+    networks:
+      - analytics_net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U user -d analytics_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:6.2-alpine
+    networks:
+      - analytics_net
 
   generator:
     build: ./generator
+    restart: on-failure  
     depends_on:
-      - db
+      db:
+        condition: service_healthy
+    networks:
+      - analytics_net
 
   redash:
-    image: redash/redash:latest
+    image: redash/redash:10.1.0.b50633
+    platform: linux/amd64
     ports:
       - "5000:5000"
     environment:
       REDASH_DATABASE_URL: "postgresql://user:password@db/analytics_db"
+      REDASH_REDIS_URL: "redis://redis:6379/0"
+      REDASH_COOKIE_SECRET: "very-secret-key"
+    networks:
+      - analytics_net
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_started
+
+  worker:
+    image: redash/redash:10.1.0.b50633
+    command: worker
+    environment:
+      REDASH_DATABASE_URL: "postgresql://user:password@db/analytics_db"
+      REDASH_REDIS_URL: "redis://redis:6379/0"
+      REDASH_COOKIE_SECRET: "very-secret-key"
+    networks:
+      - analytics_net
+    depends_on:
+      - db
+      - redis
+
+  scheduler:
+    image: redash/redash:10.1.0.b50633
+    command: scheduler
+    environment:
+      REDASH_DATABASE_URL: "postgresql://user:password@db/analytics_db"
+      REDASH_REDIS_URL: "redis://redis:6379/0"
+      REDASH_COOKIE_SECRET: "very-secret-key"
+    networks:
+      - analytics_net
+    depends_on:
+      - db
+      - redis
+
+  jupyter:
+    build: 
+      context: ./notebooks
+      dockerfile: Dockerfile
+    container_name: jupyter_analytics
+    platform: linux/amd64
+    ports:
+      - "8899:8888"  
+    environment:
+      - JUPYTER_TOKEN=1234
+      - DB_HOST=db
+      - DB_USER=user         
+      - DB_PASS=password     
+      - DB_NAME=analytics_db 
+    volumes:
+      - ./notebooks:/home/jovyan/work
+    depends_on:
+      - db
+    restart: always
+    networks:
+      - analytics_net 
+
+networks:
+  analytics_net:
+    driver: bridge
