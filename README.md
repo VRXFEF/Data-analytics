@@ -17,7 +17,6 @@
    ```bash
    git clone <ссылка_на_твой_репозиторий>
    cd my_analytics_project
-   ```
 
 2. **Запустите контейнеры:**
    ```bash	
